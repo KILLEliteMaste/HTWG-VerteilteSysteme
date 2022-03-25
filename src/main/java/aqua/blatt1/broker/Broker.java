@@ -11,10 +11,13 @@ import messaging.Message;
 
 import java.io.Serializable;
 import java.net.InetSocketAddress;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class Broker {
     private static final Endpoint endpoint = new Endpoint(4711);
     private static final ClientCollection<InetSocketAddress> clients = new ClientCollection<>();
+    private static final ExecutorService executor = Executors.newFixedThreadPool(3);
 
     public static void main(String[] args) {
 
@@ -57,5 +60,9 @@ public class Broker {
             InetSocketAddress rightNeighbour = clients.getRightNeighborOf(clients.indexOf(sender));
             endpoint.send(rightNeighbour, new HandoffRequest(fishModel));
         }
+    }
+
+    final class BrokerTask {
+
     }
 }

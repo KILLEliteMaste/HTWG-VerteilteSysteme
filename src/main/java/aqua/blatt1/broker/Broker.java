@@ -2,10 +2,7 @@ package aqua.blatt1.broker;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
-import aqua.blatt1.common.msgtypes.DeregisterRequest;
-import aqua.blatt1.common.msgtypes.HandoffRequest;
-import aqua.blatt1.common.msgtypes.RegisterRequest;
-import aqua.blatt1.common.msgtypes.RegisterResponse;
+import aqua.blatt1.common.msgtypes.*;
 import aqua.blatt2.broker.PoisonPill;
 import messaging.Endpoint;
 import messaging.Message;
@@ -17,7 +14,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-@SuppressWarnings("InfiniteLoopStatement")
 public class Broker {
     private static final Endpoint endpoint = new Endpoint(4711);
     private static final ClientCollection<InetSocketAddress> clients = new ClientCollection<>();
@@ -41,7 +37,7 @@ public class Broker {
             if (message.getPayload() instanceof PoisonPill) {
                 break;
             }
-            executor.submit(() -> new BrokerTask(message).handleMessage());
+            executor.execute(() -> new BrokerTask(message).handleMessage());
         }
     }
 
@@ -76,12 +72,35 @@ public class Broker {
             READ_WRITE_LOCK.writeLock().lock();
             clients.add(newId, sender);
             READ_WRITE_LOCK.writeLock().unlock();
+
+            READ_WRITE_LOCK.readLock().lock();
+
+
+            endpoint.send(sender, new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(sender)),Direction.LEFT));
+            endpoint.send(sender, new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(sender)),Direction.RIGHT));
+
+
             endpoint.send(sender, new RegisterResponse(newId));
+            endpoint.send(clients.getLeftNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender, Direction.RIGHT));
+            endpoint.send(clients.getRightNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender,Direction.LEFT));
+
+
+            if (clients.size()==1) {
+                endpoint.send(sender, new Token());
+            }
+            READ_WRITE_LOCK.readLock().unlock();
         }
 
         private void deregister(String id) {
             READ_WRITE_LOCK.writeLock().lock();
+
+            InetSocketAddress inetSocketAddressToBeRemoved = clients.getClient(clients.indexOf(id));
+
+            endpoint.send(clients.getLeftNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(id)), Direction.RIGHT));
+            endpoint.send(clients.getRightNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(id)),Direction.LEFT));
+
             clients.remove(clients.indexOf(id));
+
             READ_WRITE_LOCK.writeLock().unlock();
         }
 

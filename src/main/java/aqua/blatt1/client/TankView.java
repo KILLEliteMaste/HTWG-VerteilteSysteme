@@ -42,7 +42,6 @@ public class TankView extends JPanel implements Observer {
 		});
 	}
 
-	@SuppressWarnings("unused")
 	private void drawBorders(Graphics2D g2d) {
 		g2d.drawLine(0, 0, 0, TankModel.HEIGHT);
 		g2d.drawLine(TankModel.WIDTH - 1, 0, TankModel.WIDTH - 1, TankModel.HEIGHT);
@@ -62,6 +61,9 @@ public class TankView extends JPanel implements Observer {
 	public void paintComponent(Graphics g) {
 		super.paintComponent(g);
 		doDrawing(g);
+		if (!tankModel.hasToken()){
+			drawBorders((Graphics2D) g);
+		}
 	}
 
 	@Override

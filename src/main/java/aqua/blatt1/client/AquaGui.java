@@ -17,7 +17,7 @@ import javax.swing.SwingUtilities;
 @SuppressWarnings("serial")
 public class AquaGui extends JFrame implements Runnable, Observer {
 	private final List<JMenuItem> fishMenuItems = Collections
-			.synchronizedList(new ArrayList<JMenuItem>());
+			.synchronizedList(new ArrayList<>());
 
 	private final JMenu searchMenu;
 	private final Runnable updateRunnable;
@@ -49,25 +49,22 @@ public class AquaGui extends JFrame implements Runnable, Observer {
 		JMenuItem gsMenuItem = new JMenuItem("Global Snapshot");
 		toolsMenu.add(gsMenuItem);
 
-		gsMenuItem.addActionListener(new NotImplementedYetController(this));
+		gsMenuItem.addActionListener(new SnapshotController(this, tankModel));
 
 		searchMenu = new JMenu("Toggle Fish Color...");
 		toolsMenu.add(searchMenu);
 		tankModel.addObserver(this);
 
-		updateRunnable = new Runnable() {
-			@Override
-			public void run() {
-				setTitle(tankModel.getId());
+		updateRunnable = () -> {
+			setTitle(tankModel.getId());
 
-				int size = fishMenuItems.size();
-				while (tankModel.getFishCounter() > size) {
-					String fishId = "fish" + (++size) + "@" + tankModel.getId();
-					JMenuItem fishMenuItem = new JMenuItem(fishId);
-					fishMenuItem.addActionListener(new NotImplementedYetController(AquaGui.this));
-					fishMenuItems.add(fishMenuItem);
-					searchMenu.add(fishMenuItem);
-				}
+			int size = fishMenuItems.size();
+			while (tankModel.getFishCounter() > size) {
+				String fishId = "fish" + (++size) + "@" + tankModel.getId();
+				JMenuItem fishMenuItem = new JMenuItem(fishId);
+				fishMenuItem.addActionListener(new NotImplementedYetController(AquaGui.this));
+				fishMenuItems.add(fishMenuItem);
+				searchMenu.add(fishMenuItem);
 			}
 		};
 	}

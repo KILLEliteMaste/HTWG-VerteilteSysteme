@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
 import aqua.blatt1.common.msgtypes.NeighborUpdate;
+import aqua.blatt1.common.msgtypes.SnapshotToken;
 import aqua.blatt1.common.msgtypes.Token;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
@@ -21,8 +22,19 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     protected int fishCounter = 0;
     protected final ClientCommunicator.ClientForwarder forwarder;
 
+    //SNAPSHOT
+    protected RecordMode recordMode = RecordMode.IDLE;
+    private int localFishCount = 0;
+    protected boolean isInitiator = false;
+    protected boolean hasSnapshotToken = false;
+    protected boolean localSnapshotDone = false;
+    protected boolean globalSnapshotDone = false;
+    protected SnapshotToken snapshotToken = null;
+    protected int cntFishies = 0;
+
+
     private InetSocketAddress leftNeighbour;
-    private InetSocketAddress rightNeighbour ;
+    private InetSocketAddress rightNeighbour;
 
     private boolean token = false;
     Timer timer = new Timer();
@@ -31,8 +43,6 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     public TankModel(ClientCommunicator.ClientForwarder forwarder) {
         this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
         this.forwarder = forwarder;
-
-
     }
 
     synchronized void onRegistration(String id) {
@@ -45,6 +55,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
             x = x > WIDTH - FishModel.getXSize() - 1 ? WIDTH - FishModel.getXSize() - 1 : x;
             y = y > HEIGHT - FishModel.getYSize() ? HEIGHT - FishModel.getYSize() : y;
 
+            cntFishies++;
             FishModel fish = new FishModel("fish" + (++fishCounter) + "@" + getId(), x, y,
                     rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
 
@@ -53,6 +64,13 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     }
 
     synchronized void receiveFish(FishModel fish) {
+        cntFishies++;
+        if ((recordMode == RecordMode.LEFT && fish.getDirection() == Direction.RIGHT)
+                || (recordMode == RecordMode.RIGHT && fish.getDirection() == Direction.LEFT)
+                || recordMode == RecordMode.BOTH) {
+            localFishCount++;
+        }
+
         fish.setToStart();
         fishies.add(fish);
     }
@@ -60,17 +78,13 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     synchronized void receiveToken(Token tokenRequest) {
         token = true;
 
-        System.out.println("HAS TOKEN: "+id);
         timer.schedule(new TimerTask() {
             @Override
             public void run() {
-                if (token){
+                if (token) {
                     token = false;
-                    System.out.println("SEND TOKEN TO LEFT");
                     forwarder.handOffToken(leftNeighbour);
-
                 }
-                //System.out.println("TIMER TASK FINISHED IN: ");
             }
         }, 5000);
     }
@@ -87,7 +101,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         return id;
     }
 
-    public boolean hasToken(){
+    public boolean hasToken() {
         return token;
 
     }
@@ -106,10 +120,11 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
             fish.update();
 
-            if (fish.hitsEdge()){
-                if (token){
+            if (fish.hitsEdge()) {
+                if (token) {
+                    cntFishies--;
                     forwarder.handOff(fish.getDirection() == Direction.LEFT ? leftNeighbour : rightNeighbour, fish);
-                }else {
+                } else {
                     fish.reverse();
                 }
             }
@@ -142,4 +157,65 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         forwarder.deregister(id);
     }
 
+    public synchronized void initiateSnapshot(boolean initiator, RecordMode mode) {
+        localFishCount = cntFishies;
+        this.isInitiator = initiator;
+        recordMode = mode;
+
+        //Sende den snapshot marker in beide richtungen
+        forwarder.sendSnapshotMarker(leftNeighbour);
+        forwarder.sendSnapshotMarker(rightNeighbour);
+    }
+
+    // Skript5 17-18
+    public void receiveSnapshotMarker(InetSocketAddress sender){
+        // falls es sich nicht im Aufzeichungsmodus befinden
+        if(recordMode == RecordMode.IDLE) {
+            // starte Aufzeichnungsmodus für alle anderen Eingangskanäle
+            if(sender.equals(leftNeighbour)){
+                initiateSnapshot(false, RecordMode.RIGHT);
+            } else {
+                initiateSnapshot(false, RecordMode.LEFT);
+            }
+        } else if(recordMode == RecordMode.LEFT || recordMode == RecordMode.RIGHT) {
+            recordMode = RecordMode.IDLE;
+
+            if(isInitiator) {
+                SnapshotToken token = new SnapshotToken();
+                token.increaseFishCount(localFishCount);
+                forwarder.sendSnapshotToken(leftNeighbour, token);
+            } else {
+                localSnapshotDone = true;
+                // Hatte Token schon aber war nicht fertig mit dem Snapshot. Jetzt bin ich fertig mit Snapshot, dann schicke ich es weiter.
+                if(hasSnapshotToken){
+                    snapshotToken.increaseFishCount(localFishCount);
+                    forwarder.sendSnapshotToken(leftNeighbour, snapshotToken);
+                    hasSnapshotToken = false;
+                    localSnapshotDone = false;
+                }
+            }
+        } else if(sender.equals(leftNeighbour) && recordMode == RecordMode.BOTH) {
+            recordMode = RecordMode.RIGHT;
+        } else if(sender.equals(rightNeighbour) && recordMode == RecordMode.BOTH) {
+            recordMode = RecordMode.LEFT;
+        }
+    }
+
+    public void receiveSnapshotToken(SnapshotToken token) {
+        if (isInitiator) {
+            // Token ist zurück gekommen. Zeige Anzahl an Fishies
+            globalSnapshotDone = true;
+            snapshotToken = token;
+        } else {
+            hasSnapshotToken = true;
+            snapshotToken = token;
+            // Hab Token und bin fertig mit dem Snapshot, dann gleich schicken
+            if(localSnapshotDone) {
+                token.increaseFishCount(localFishCount);
+                forwarder.sendSnapshotToken(leftNeighbour, token);
+                hasSnapshotToken = false;
+                localSnapshotDone = false;
+            }
+        }
+    }
 }

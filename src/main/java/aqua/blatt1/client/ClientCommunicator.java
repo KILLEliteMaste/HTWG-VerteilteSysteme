@@ -37,6 +37,14 @@ public class ClientCommunicator {
 		public void handOffToken(InetSocketAddress inetSocketAddress) {
 			endpoint.send(inetSocketAddress, new Token());
 		}
+
+		public void sendSnapshotMarker(InetSocketAddress inetSocketAddress) {
+			endpoint.send(inetSocketAddress, new SnapshotMarker());
+		}
+
+		public void sendSnapshotToken(InetSocketAddress neigbour, SnapshotToken snapshotToken) {
+			endpoint.send(neigbour, snapshotToken);
+		}
 	}
 
 	public class ClientReceiver extends Thread {
@@ -62,6 +70,13 @@ public class ClientCommunicator {
 
 				if (msg.getPayload() instanceof Token)
 					tankModel.receiveToken(((Token) msg.getPayload()));
+
+				if (msg.getPayload() instanceof SnapshotMarker)
+					tankModel.receiveSnapshotMarker(msg.getSender());
+
+				if (msg.getPayload() instanceof SnapshotToken)
+					tankModel.receiveSnapshotToken((SnapshotToken) msg.getPayload());
+
 
 			}
 			System.out.println("Receiver stopped.");

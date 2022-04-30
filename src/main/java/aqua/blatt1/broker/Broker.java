@@ -9,6 +9,8 @@ import messaging.Message;
 
 import java.io.Serializable;
 import java.net.InetSocketAddress;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -20,6 +22,10 @@ public class Broker {
     private static final ExecutorService executor = Executors.newFixedThreadPool(3);
     private static final ReadWriteLock READ_WRITE_LOCK = new ReentrantReadWriteLock();
     //private static final AtomicBoolean stopRequested = new AtomicBoolean(true);
+
+    //Heimatgestützt
+    //Namespace - TankId zu InetSocketAddress
+    private static final Map<String, InetSocketAddress> namespace = new HashMap<>();
 
     public static void main(String[] args) {
         System.out.println("Start broker Task");
@@ -58,48 +64,59 @@ public class Broker {
                 register(message.getSender());
             } else if (serializable instanceof DeregisterRequest deregisterRequest) {
                 System.out.println("DeregisterRequest");
-                deregister(deregisterRequest.getId());
+                deregister(message.getSender(), deregisterRequest);
             } else if (serializable instanceof HandoffRequest handoffRequest) {
                 System.out.println("HandoffRequest");
                 handoffFish(handoffRequest.getFish(), message.getSender());
+            } else if (serializable instanceof NameResolutionRequest e) {
+                handleNameResolutionRequest(message.getSender(), e);
             } else {
                 System.out.println(serializable.toString());
             }
+        }
+
+        private void handleNameResolutionRequest(InetSocketAddress sender, NameResolutionRequest nrr) {
+            READ_WRITE_LOCK.readLock().lock();
+            endpoint.send(sender, new NameResolutionResponse(namespace.get(nrr.tankId()), nrr.requestId()));
+            READ_WRITE_LOCK.readLock().unlock();
         }
 
         private void register(InetSocketAddress sender) {
             String newId = "tank" + (clients.size() + 1);
             READ_WRITE_LOCK.writeLock().lock();
             clients.add(newId, sender);
+            namespace.put(newId, sender);
             READ_WRITE_LOCK.writeLock().unlock();
 
             READ_WRITE_LOCK.readLock().lock();
 
 
-            endpoint.send(sender, new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(sender)),Direction.LEFT));
-            endpoint.send(sender, new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(sender)),Direction.RIGHT));
+            endpoint.send(sender, new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(sender)), Direction.LEFT));
+            endpoint.send(sender, new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(sender)), Direction.RIGHT));
 
 
             endpoint.send(sender, new RegisterResponse(newId));
             endpoint.send(clients.getLeftNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender, Direction.RIGHT));
-            endpoint.send(clients.getRightNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender,Direction.LEFT));
+            endpoint.send(clients.getRightNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender, Direction.LEFT));
 
 
-            if (clients.size()==1) {
+            if (clients.size() == 1) {
                 endpoint.send(sender, new Token());
             }
             READ_WRITE_LOCK.readLock().unlock();
         }
 
-        private void deregister(String id) {
+        private void deregister(InetSocketAddress sender, DeregisterRequest dr) {
+
             READ_WRITE_LOCK.writeLock().lock();
 
-            InetSocketAddress inetSocketAddressToBeRemoved = clients.getClient(clients.indexOf(id));
+            InetSocketAddress inetSocketAddressToBeRemoved = clients.getClient(clients.indexOf(dr.getId()));
 
-            endpoint.send(clients.getLeftNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(id)), Direction.RIGHT));
-            endpoint.send(clients.getRightNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(id)),Direction.LEFT));
+            endpoint.send(clients.getLeftNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(dr.getId())), Direction.RIGHT));
+            endpoint.send(clients.getRightNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(dr.getId())), Direction.LEFT));
 
-            clients.remove(clients.indexOf(id));
+            clients.remove(clients.indexOf(dr.getId()));
+            namespace.remove(dr.getId());
 
             READ_WRITE_LOCK.writeLock().unlock();
         }

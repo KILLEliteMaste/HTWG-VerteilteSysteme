@@ -7,9 +7,7 @@ import java.util.concurrent.TimeUnit;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
-import aqua.blatt1.common.msgtypes.NeighborUpdate;
-import aqua.blatt1.common.msgtypes.SnapshotToken;
-import aqua.blatt1.common.msgtypes.Token;
+import aqua.blatt1.common.msgtypes.*;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
 
@@ -40,6 +38,13 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     Timer timer = new Timer();
 
 
+    //Namensdienste - Vorwärtsreferenzen
+    Map<String, FishDirectionReference> fishDirectionReferenceMap = new HashMap<>();
+
+    //Namensdienste 2 - Heimatgestützt
+    //FishId - TankAddress
+    Map<String, InetSocketAddress> homeAgent = new HashMap<>();
+
     public TankModel(ClientCommunicator.ClientForwarder forwarder) {
         this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
         this.forwarder = forwarder;
@@ -59,6 +64,12 @@ public class TankModel extends Observable implements Iterable<FishModel> {
             FishModel fish = new FishModel("fish" + (++fishCounter) + "@" + getId(), x, y,
                     rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
 
+            //Vorwärtsreferenzen
+            fishDirectionReferenceMap.put(fish.getId(), FishDirectionReference.HERE);
+
+            //Heimatgestützt
+            homeAgent.put(fish.getId(), null);
+
             fishies.add(fish);
         }
     }
@@ -67,11 +78,24 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         cntFishies++;
         if ((recordMode == RecordMode.LEFT && fish.getDirection() == Direction.RIGHT)
                 || (recordMode == RecordMode.RIGHT && fish.getDirection() == Direction.LEFT)
-                || recordMode == RecordMode.BOTH) {
+                || recordMode == RecordMode.BOTH)
+        {
             localFishCount++;
         }
 
         fish.setToStart();
+
+        //Vorwärtsreferenzen
+        fishDirectionReferenceMap.put(fish.getId(), FishDirectionReference.HERE);
+
+        //Heimatgesützt
+        //Wenn fisch wieder in den eigenen Tank schwimmt - Aufgabenblatt Fall a
+        if (fish.getTankId().equals(id)) {
+            homeAgent.put(fish.getId(), null);
+        } else {//Fisch schwimmt in einen anderen Tank - Fall b
+            forwarder.sendNameResolutionRequest(new NameResolutionRequest(fish.getTankId(), fish.getId()));
+        }
+
         fishies.add(fish);
     }
 
@@ -123,14 +147,16 @@ public class TankModel extends Observable implements Iterable<FishModel> {
             if (fish.hitsEdge()) {
                 if (token) {
                     cntFishies--;
+                    fishDirectionReferenceMap.put(fish.getId(), fish.getDirection() == Direction.LEFT ? FishDirectionReference.LEFT : FishDirectionReference.RIGHT);
                     forwarder.handOff(fish.getDirection() == Direction.LEFT ? leftNeighbour : rightNeighbour, fish);
                 } else {
                     fish.reverse();
                 }
             }
 
-            if (fish.disappears())
+            if (fish.disappears()) {
                 it.remove();
+            }
         }
     }
 
@@ -168,35 +194,35 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     }
 
     // Skript5 17-18
-    public void receiveSnapshotMarker(InetSocketAddress sender){
+    public void receiveSnapshotMarker(InetSocketAddress sender) {
         // falls es sich nicht im Aufzeichungsmodus befinden
-        if(recordMode == RecordMode.IDLE) {
+        if (recordMode == RecordMode.IDLE) {
             // starte Aufzeichnungsmodus für alle anderen Eingangskanäle
-            if(sender.equals(leftNeighbour)){
+            if (sender.equals(leftNeighbour)) {
                 initiateSnapshot(false, RecordMode.RIGHT);
             } else {
                 initiateSnapshot(false, RecordMode.LEFT);
             }
-        } else if(recordMode == RecordMode.LEFT || recordMode == RecordMode.RIGHT) {
+        } else if (recordMode == RecordMode.LEFT || recordMode == RecordMode.RIGHT) {
             recordMode = RecordMode.IDLE;
 
-            if(isInitiator) {
+            if (isInitiator) {
                 SnapshotToken token = new SnapshotToken();
                 token.increaseFishCount(localFishCount);
                 forwarder.sendSnapshotToken(leftNeighbour, token);
             } else {
                 localSnapshotDone = true;
                 // Hatte Token schon aber war nicht fertig mit dem Snapshot. Jetzt bin ich fertig mit Snapshot, dann schicke ich es weiter.
-                if(hasSnapshotToken){
+                if (hasSnapshotToken) {
                     snapshotToken.increaseFishCount(localFishCount);
                     forwarder.sendSnapshotToken(leftNeighbour, snapshotToken);
                     hasSnapshotToken = false;
                     localSnapshotDone = false;
                 }
             }
-        } else if(sender.equals(leftNeighbour) && recordMode == RecordMode.BOTH) {
+        } else if (sender.equals(leftNeighbour) && recordMode == RecordMode.BOTH) {
             recordMode = RecordMode.RIGHT;
-        } else if(sender.equals(rightNeighbour) && recordMode == RecordMode.BOTH) {
+        } else if (sender.equals(rightNeighbour) && recordMode == RecordMode.BOTH) {
             recordMode = RecordMode.LEFT;
         }
     }
@@ -210,7 +236,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
             hasSnapshotToken = true;
             snapshotToken = token;
             // Hab Token und bin fertig mit dem Snapshot, dann gleich schicken
-            if(localSnapshotDone) {
+            if (localSnapshotDone) {
                 token.increaseFishCount(localFishCount);
                 forwarder.sendSnapshotToken(leftNeighbour, token);
                 hasSnapshotToken = false;
@@ -218,4 +244,51 @@ public class TankModel extends Observable implements Iterable<FishModel> {
             }
         }
     }
+
+    //Vorwärtsreferenzen
+    public void locateFishGlobally(String fishId) {
+        if (fishDirectionReferenceMap.get(fishId) == FishDirectionReference.HERE) {
+            locateFishLocally(fishId);
+        } else if (fishDirectionReferenceMap.get(fishId) == FishDirectionReference.LEFT) {
+            forwarder.sendLocationRequest(leftNeighbour, fishId);
+        } else {
+            forwarder.sendLocationRequest(rightNeighbour, fishId);
+        }
+    }
+
+    //Heimatgestützt
+    public void locateFishGloballyHomeAgent(String fishId) {
+        if (homeAgent.get(fishId) == null) { //fisch ist momentan im eigenen Tank
+            System.out.println(homeAgent);
+            locateFishLocally(fishId);
+        } else {
+            System.out.println(homeAgent);
+            forwarder.sendLocationRequest(homeAgent.get(fishId), fishId);
+        }
+    }
+
+    //Vorwärtsreferenzen & Heimatgestützt
+    public void locateFishLocally(String fishId) {
+        for (FishModel fish : fishies) {
+            if (fishId.equals(fish.getId())) {
+                fish.toggle();
+            }
+        }
+    }
+
+    //Heimatgestützt
+    public void receiveNameResolutionResponse(NameResolutionResponse nrr) {
+        forwarder.sendLocationUpdate(nrr.inetSocketAddress(), new LocationUpdate(nrr.requestId()));
+    }
+
+    //Heimatgestützt
+    public void updateFishLocation(LocationUpdate lu, InetSocketAddress sender) {
+        homeAgent.put(lu.fishId(), sender);
+    }
+}
+
+enum FishDirectionReference {
+    HERE,
+    LEFT,
+    RIGHT
 }

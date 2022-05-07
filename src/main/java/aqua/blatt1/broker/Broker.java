@@ -89,7 +89,7 @@ public class Broker {
         }
 
         private void register(InetSocketAddress sender) {
-            READ_WRITE_LOCK.readLock().lock();
+            READ_WRITE_LOCK.writeLock().lock();
             int index = clients.indexOf(sender);
             if (index != -1) {
                 String id = clients.getIdOf(index);
@@ -98,7 +98,7 @@ public class Broker {
                 READ_WRITE_LOCK.readLock().unlock();
                 return;
             }
-            READ_WRITE_LOCK.readLock().unlock();
+            READ_WRITE_LOCK.writeLock().unlock();
 
 
 

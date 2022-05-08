@@ -37,48 +37,39 @@ public class Broker {
 
     public static void main(String[] args) {
         System.out.println("Start broker Task");
-        /*
-        executor.submit(() -> {
-            int a = JOptionPane.showConfirmDialog(null,"Click the button to stop the broker","Broker Stop", JOptionPane.DEFAULT_OPTION);
-            if (a == 0){
-                stopRequested.set(false);
-            }
-        });
-        */
-
-        timer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                clients.getClients().stream().filter(client -> client.instant.isBefore(Instant.now().minusMillis(LEASE_TIME * 3)))
-                        .forEach(client -> deregister(client.client));
-            }
-        }, 5000, 15000);
-
-        while (true) {
-            Message message = endpoint.blockingReceive();
-            if (message.getPayload() instanceof PoisonPill) {
-                break;
-            }
-            executor.execute(() -> new BrokerTask(message).handleMessage());
-        }
+        new BrokerTask();
     }
 
 
     static final class BrokerTask {
-        private final Message message;
-        private final Serializable serializable;
 
-        public BrokerTask(Message message) {
+        public BrokerTask() {
             System.out.println("Start broker Task");
-            this.message = message;
-            this.serializable = message.getPayload();
+
+            timer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    //READ_WRITE_LOCK.readLock().lock();
+                    clients.getClients().stream().filter(client -> client.instant.isBefore(Instant.now().minusMillis(LEASE_TIME * 3)))
+                            .forEach(client -> deregister(client.client));
+                    //READ_WRITE_LOCK.readLock().unlock();
+                }
+            }, 5000, 15000);
+
+            while (true) {
+                Message message = endpoint.blockingReceive();
+                if (message.getPayload() instanceof PoisonPill) {
+                    break;
+                }
+                executor.execute(() -> handleMessage(message, message.getPayload()));
+            }
         }
 
-        private void handleMessage() {
+        private void handleMessage(final Message message, final Serializable serializable) {
             if (serializable instanceof RegisterRequest) {
                 System.out.println("Register request received");
                 register(message.getSender());
-            } else if (serializable instanceof DeregisterRequest deregisterRequest) {
+            } else if (serializable instanceof DeregisterRequest) {
                 System.out.println("DeregisterRequest");
                 deregister(message.getSender());
             } else if (serializable instanceof HandoffRequest handoffRequest) {
@@ -104,7 +95,7 @@ public class Broker {
                 String id = clients.getIdOf(index);
                 clients.remove(index);
                 clients.add(id, sender, Instant.now());
-                lock.readLock().unlock();
+                READ_WRITE_LOCK.readLock().unlock();
                 return;
             }
             READ_WRITE_LOCK.readLock().unlock();
@@ -139,10 +130,10 @@ public class Broker {
 
             READ_WRITE_LOCK.writeLock().lock();
 
-            InetSocketAddress inetSocketAddressToBeRemoved = clients.getClient(clients.indexOf(dr.getId()));
+            InetSocketAddress inetSocketAddressToBeRemoved = clients.getClient(clients.indexOf(sender));
 
-            endpoint.send(clients.getLeftNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(dr.getId())), Direction.RIGHT));
-            endpoint.send(clients.getRightNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(dr.getId())), Direction.LEFT));
+            endpoint.send(clients.getLeftNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(sender)), Direction.RIGHT));
+            endpoint.send(clients.getRightNeighborOf(clients.indexOf(inetSocketAddressToBeRemoved)), new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(sender)), Direction.LEFT));
 
             String id = clients.getIdOf(clients.indexOf(sender));
             clients.remove(clients.indexOf(sender));
@@ -157,7 +148,6 @@ public class Broker {
                 InetSocketAddress leftNeighbour = clients.getLeftNeighborOf(clients.indexOf(sender));
                 READ_WRITE_LOCK.readLock().unlock();
                 endpoint.send(leftNeighbour, new HandoffRequest(fishModel));
-
             } else if (fishModel.getDirection() == Direction.RIGHT) {
                 READ_WRITE_LOCK.readLock().lock();
                 InetSocketAddress rightNeighbour = clients.getRightNeighborOf(clients.indexOf(sender));

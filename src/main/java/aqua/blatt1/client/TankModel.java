@@ -57,6 +57,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         timer.schedule(new TimerTask() {
             @Override
             public void run() {
+                System.out.println("NEW REGISTER");
                 forwarder.register();
             }
         }, leaseTime);

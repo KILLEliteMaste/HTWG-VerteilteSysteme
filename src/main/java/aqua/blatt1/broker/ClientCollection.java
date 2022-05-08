@@ -26,7 +26,7 @@ public class ClientCollection<T> {
 	private final List<Client> clients;
 
 	public ClientCollection() {
-		clients = new ArrayList<Client>();
+		clients = new ArrayList<>();
 	}
 
 	public ClientCollection<T> add(String id, T client, Instant instant) {
@@ -71,6 +71,7 @@ public class ClientCollection<T> {
 	}
 
 	public T getLeftNeighborOf(int index) {
+        System.out.println("SIZE: "+clients.size());
 		return index == 0 ? clients.get(clients.size() - 1).client : clients.get(index - 1).client;
 	}
 

@@ -71,23 +71,23 @@ public class ClientCommunicator {
 			while (!isInterrupted()) {
 				Message msg = endpoint.blockingReceive();
 
-				if (msg.getPayload() instanceof RegisterResponse)
-					tankModel.onRegistration(((RegisterResponse) msg.getPayload()).getId());
+				if (msg.getPayload() instanceof RegisterResponse response)
+					tankModel.onRegistration(response.id(), response.lease());
 
-				if (msg.getPayload() instanceof HandoffRequest)
-					tankModel.receiveFish(((HandoffRequest) msg.getPayload()).getFish());
+				if (msg.getPayload() instanceof HandoffRequest hr)
+					tankModel.receiveFish(hr.fish());
 
-				if (msg.getPayload() instanceof NeighborUpdate)
-					tankModel.updateNeighbor(((NeighborUpdate) msg.getPayload()));
+				if (msg.getPayload() instanceof NeighborUpdate nu)
+					tankModel.updateNeighbor(nu);
 
-				if (msg.getPayload() instanceof Token)
-					tankModel.receiveToken(((Token) msg.getPayload()));
+				if (msg.getPayload() instanceof Token token)
+					tankModel.receiveToken(token);
 
 				if (msg.getPayload() instanceof SnapshotMarker)
 					tankModel.receiveSnapshotMarker(msg.getSender());
 
-				if (msg.getPayload() instanceof SnapshotToken)
-					tankModel.receiveSnapshotToken((SnapshotToken) msg.getPayload());
+				if (msg.getPayload() instanceof SnapshotToken st)
+					tankModel.receiveSnapshotToken(st);
 
                 if(msg.getPayload() instanceof LocationRequest lr){
                     //Vorwärtsreferenzen

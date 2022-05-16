@@ -60,7 +60,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
                 System.out.println("NEW REGISTER");
                 forwarder.register();
             }
-        }, leaseTime);
+        }, leaseTime, leaseTime);
     }
 
     public synchronized void newFish(int x, int y) {

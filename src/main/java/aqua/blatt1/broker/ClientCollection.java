@@ -13,8 +13,7 @@ public class ClientCollection<T> {
 	public class Client {
 		final String id;
 		final T client;
-
-        final Instant instant;
+        volatile Instant instant;
 
 		Client(String id, T client, Instant instant) {
 			this.id = id;
@@ -59,6 +58,10 @@ public class ClientCollection<T> {
 
 	public T getClient(int index) {
 		return clients.get(index).client;
+	}
+
+	public Client getActualClient(int index) {
+		return clients.get(index);
 	}
 
     public List<Client> getClients() {

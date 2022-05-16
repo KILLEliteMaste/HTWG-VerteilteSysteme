@@ -49,12 +49,16 @@ public class Broker {
             timer.schedule(new TimerTask() {
                 @Override
                 public void run() {
-                    //READ_WRITE_LOCK.readLock().lock();
-                    clients.getClients().stream().filter(client -> client.instant.isBefore(Instant.now().minusMillis(LEASE_TIME * 3)))
-                            .forEach(client -> deregister(client.client));
-                    //READ_WRITE_LOCK.readLock().unlock();
+                    READ_WRITE_LOCK.readLock().lock();
+                    clients.getClients().stream()
+                            .filter(client -> client.instant.isBefore(Instant.now().minusMillis(LEASE_TIME * 3)))
+                            .forEach(client -> {
+                                deregister(client.client);
+                            });
+
+                    READ_WRITE_LOCK.readLock().unlock();
                 }
-            }, 5000, 15000);
+            }, 5000, 5000/*15000*/);
 
             while (true) {
                 Message message = endpoint.blockingReceive();
@@ -71,7 +75,9 @@ public class Broker {
                 register(message.getSender());
             } else if (serializable instanceof DeregisterRequest) {
                 System.out.println("DeregisterRequest");
+                READ_WRITE_LOCK.writeLock().lock();
                 deregister(message.getSender());
+                READ_WRITE_LOCK.writeLock().unlock();
             } else if (serializable instanceof HandoffRequest handoffRequest) {
                 System.out.println("HandoffRequest");
                 handoffFish(handoffRequest.fish(), message.getSender());
@@ -93,29 +99,24 @@ public class Broker {
             int index = clients.indexOf(sender);
             if (index != -1) {
                 String id = clients.getIdOf(index);
-                clients.remove(index);
-                clients.add(id, sender, Instant.now());
-                READ_WRITE_LOCK.readLock().unlock();
+                clients.getActualClient(index).instant = Instant.now();
+                READ_WRITE_LOCK.writeLock().unlock();
                 return;
             }
-            READ_WRITE_LOCK.writeLock().unlock();
-
-
 
             String newId = "tank" + (clients.size() + 1);
-            READ_WRITE_LOCK.writeLock().lock();
+
             clients.add(newId, sender, Instant.now());
             namespace.put(newId, sender);
             READ_WRITE_LOCK.writeLock().unlock();
 
             READ_WRITE_LOCK.readLock().lock();
 
-
             endpoint.send(sender, new NeighborUpdate(clients.getLeftNeighborOf(clients.indexOf(sender)), Direction.LEFT));
             endpoint.send(sender, new NeighborUpdate(clients.getRightNeighborOf(clients.indexOf(sender)), Direction.RIGHT));
 
 
-            endpoint.send(sender, new RegisterResponse(newId,LEASE_TIME));
+            endpoint.send(sender, new RegisterResponse(newId, LEASE_TIME));
             endpoint.send(clients.getLeftNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender, Direction.RIGHT));
             endpoint.send(clients.getRightNeighborOf(clients.indexOf(sender)), new NeighborUpdate(sender, Direction.LEFT));
 
@@ -127,7 +128,6 @@ public class Broker {
         }
 
         private void deregister(InetSocketAddress sender) {
-
             READ_WRITE_LOCK.writeLock().lock();
 
             InetSocketAddress inetSocketAddressToBeRemoved = clients.getClient(clients.indexOf(sender));
